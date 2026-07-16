@@ -1,0 +1,49 @@
+name: Release
+
+# Tag-driven release. Go has no package registry to publish to — the module
+# proxy (proxy.golang.org / pkg.go.dev) indexes public git tags directly, so
+# "publishing" is: green tests + a version tag + a GitHub release.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+      - name: Fetch cassettes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/fetch-cassettes.sh
+      - run: go vet ./...
+      - run: go test ./...
+
+  github-release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" --title "$tag" \
+            --notes "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md). Install: \`go get github.com/getzazu/zazu-go@$tag\`"
+
+      - name: Warm the module proxy index
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          curl -fsSL "https://proxy.golang.org/github.com/getzazu/zazu-go/@v/$tag.info" || true
